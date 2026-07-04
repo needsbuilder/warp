@@ -18,6 +18,9 @@ pub enum MenuItem {
 pub struct Menu {
     pub title: String,
     pub menu_items: Vec<MenuItem>,
+    /// Marks the OS window menu explicitly so the check keeps working when
+    /// the visible title is localized (e.g. "윈도우").
+    window_menu: bool,
 }
 
 impl Menu {
@@ -25,11 +28,22 @@ impl Menu {
         Menu {
             title: title.into(),
             menu_items,
+            window_menu: false,
+        }
+    }
+
+    /// Creates the OS window menu. Prefer this over relying on the English
+    /// "Window" title, which breaks under localization.
+    pub fn new_window_menu<S: Into<String>>(title: S, menu_items: Vec<MenuItem>) -> Self {
+        Menu {
+            title: title.into(),
+            menu_items,
+            window_menu: true,
         }
     }
 
     pub fn is_window_menu(&self) -> bool {
-        &self.title == "Window"
+        self.window_menu || self.title == "Window"
     }
 }
 
