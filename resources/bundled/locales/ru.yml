@@ -281,7 +281,7 @@ ru:
     import_to_team_drive: "Импортировать в командный Drive"
     open_theme_picker: "Открыть выбор темы"
     sample_process: "Сэмплировать процесс"
-    dump_heap_profile: "Дамп профиля кучи (только один раз)"
+    dump_heap_profile: "Записать профиль кучи на диск"
     open_tab_configs_menu: "Открыть меню конфигураций вкладок"
     increase_zoom_level: "Увеличить масштаб"
     decrease_zoom_level: "Уменьшить масштаб"
