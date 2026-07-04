@@ -3127,18 +3127,42 @@ impl FeaturesPageView {
         }
 
         let categories = vec![
-            Category::new("General", general_widgets),
-            Category::new("Session", session_widgets),
-            Category::new("Keys", keys_widgets),
-            Category::new("Text Editing", text_editing_widgets),
-            Category::new("Terminal Input", editor_widgets),
-            Category::new("Terminal", terminal_widgets),
-            Category::new("Notifications", notifications_widgets),
             Category::new(
-                "Workflows",
+                crate::menu_label("settings.category.general", "General"),
+                general_widgets,
+            ),
+            Category::new(
+                crate::menu_label("settings.category.session", "Session"),
+                session_widgets,
+            ),
+            Category::new(
+                crate::menu_label("settings.category.keys", "Keys"),
+                keys_widgets,
+            ),
+            Category::new(
+                crate::menu_label("settings.category.text_editing", "Text Editing"),
+                text_editing_widgets,
+            ),
+            Category::new(
+                crate::menu_label("settings.category.terminal_input", "Terminal Input"),
+                editor_widgets,
+            ),
+            Category::new(
+                crate::menu_label("settings.category.terminal", "Terminal"),
+                terminal_widgets,
+            ),
+            Category::new(
+                crate::menu_label("settings.category.notifications", "Notifications"),
+                notifications_widgets,
+            ),
+            Category::new(
+                crate::menu_label("settings.category.workflows", "Workflows"),
                 vec![Box::new(WorkflowsInCommandSearch::default())],
             ),
-            Category::new("System", system_widgets),
+            Category::new(
+                crate::menu_label("settings.category.system", "System"),
+                system_widgets,
+            ),
         ];
 
         PageType::new_categorized(categories, None)
@@ -4678,7 +4702,11 @@ impl SettingsWidget for NativeRedirectWidget {
                 on_click_action: None,
                 secondary_text: None,
                 tooltip_override_text: Some(
-                    "Automatically open links in desktop app whenever possible.".into(),
+                    crate::menu_label(
+                        "settings.features.open_links_desktop_tooltip",
+                        "Automatically open links in desktop app whenever possible.",
+                    )
+                    .into(),
                 ),
             }),
             LocalOnlyIconState::for_setting(
@@ -4772,7 +4800,10 @@ impl SettingsWidget for SessionRestorationWidget {
 
         if app.is_wayland() {
             let message = Text::new_inline(
-                "Window positions won't be restored on Wayland. ",
+                crate::menu_label(
+                    "settings.features.wayland_no_restore",
+                    "Window positions won't be restored on Wayland. ",
+                ),
                 appearance.ui_font_family(),
                 CONTENT_FONT_SIZE,
             )
