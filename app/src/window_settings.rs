@@ -1,6 +1,88 @@
+use serde::{Deserialize, Serialize};
 use settings::macros::define_settings_group;
 use settings::{RespectUserSyncSetting, SupportedPlatforms, SyncToCloud};
+use warpui::rendering::BackgroundShaderKind;
 use warpui::{AppContext, WindowId};
+
+/// Which background shader effect to render behind the window content.
+#[derive(
+    Default,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Copy,
+    Clone,
+    schemars::JsonSchema,
+    settings_value::SettingsValue,
+)]
+#[schemars(
+    description = "Which background shader effect to render behind the window content.",
+    rename_all = "snake_case"
+)]
+pub enum BackgroundShaderSelection {
+    #[default]
+    MeshGradient,
+    Swirl,
+    Warp,
+    NeuroNoise,
+    PerlinNoise,
+    ColorPanels,
+    Metaballs,
+    LiquidMetal,
+    GodRays,
+    Water,
+    Voronoi,
+    SmokeRing,
+    Spiral,
+    GrainGradient,
+    GemSmoke,
+    Heatmap,
+}
+
+impl BackgroundShaderSelection {
+    /// All selectable values, in display order.
+    pub const VALUES: [Self; 16] = [
+        Self::MeshGradient,
+        Self::Swirl,
+        Self::Warp,
+        Self::NeuroNoise,
+        Self::PerlinNoise,
+        Self::ColorPanels,
+        Self::Metaballs,
+        Self::LiquidMetal,
+        Self::GodRays,
+        Self::Water,
+        Self::Voronoi,
+        Self::SmokeRing,
+        Self::Spiral,
+        Self::GrainGradient,
+        Self::GemSmoke,
+        Self::Heatmap,
+    ];
+
+    /// The shader kind to render.
+    pub fn kind(&self) -> BackgroundShaderKind {
+        match self {
+            Self::MeshGradient => BackgroundShaderKind::MeshGradient,
+            Self::Swirl => BackgroundShaderKind::Swirl,
+            Self::Warp => BackgroundShaderKind::Warp,
+            Self::NeuroNoise => BackgroundShaderKind::NeuroNoise,
+            Self::PerlinNoise => BackgroundShaderKind::PerlinNoise,
+            Self::ColorPanels => BackgroundShaderKind::ColorPanels,
+            Self::Metaballs => BackgroundShaderKind::Metaballs,
+            Self::LiquidMetal => BackgroundShaderKind::LiquidMetal,
+            Self::GodRays => BackgroundShaderKind::GodRays,
+            Self::Water => BackgroundShaderKind::Water,
+            Self::Voronoi => BackgroundShaderKind::Voronoi,
+            Self::SmokeRing => BackgroundShaderKind::SmokeRing,
+            Self::Spiral => BackgroundShaderKind::Spiral,
+            Self::GrainGradient => BackgroundShaderKind::GrainGradient,
+            Self::GemSmoke => BackgroundShaderKind::GemSmoke,
+            Self::Heatmap => BackgroundShaderKind::Heatmap,
+        }
+    }
+}
 
 define_settings_group!(WindowSettings, settings: [
     background_blur_radius: BackgroundBlurRadius {
@@ -85,6 +167,26 @@ define_settings_group!(WindowSettings, settings: [
         private: false,
         toml_path: "appearance.window.zoom_level",
         description: "The zoom level for the window, as a percentage.",
+    },
+    animated_background: AnimatedBackground {
+        type: bool,
+        default: true,
+        supported_platforms: SupportedPlatforms::MAC,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
+        private: false,
+        toml_path: "appearance.window.animated_background",
+        description: "Whether to render the animated background shader.",
+    },
+    background_shader: BackgroundShaderChoice {
+        type: BackgroundShaderSelection,
+        default: BackgroundShaderSelection::MeshGradient,
+        supported_platforms: SupportedPlatforms::MAC,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
+        private: false,
+        toml_path: "appearance.window.background_shader",
+        description: "Which background shader effect to render.",
     },
 ]);
 

@@ -109,6 +109,91 @@ impl Image {
     }
 }
 
+/// An animated background shader enabled by a theme, drawn behind all window
+/// content. See `background_shader` in the theme YAML schema.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackgroundShader {
+    /// The shader effect name (e.g. `mesh_gradient`).
+    pub name: String,
+    /// The shader's color palette. Empty means "use the shader's default
+    /// palette".
+    pub colors: Vec<ColorU>,
+    /// Animation speed as a percentage; 100 = normal speed.
+    pub speed: u16,
+    /// How strongly the shader shows through terminal panes, mirroring a
+    /// background image's `opacity` (0-100).
+    pub opacity: Opacity,
+}
+
+/// This is a helper struct used for (de)serialization of [`BackgroundShader`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+struct SerializedBackgroundShader {
+    name: String,
+    #[serde(default)]
+    colors: Vec<String>,
+    #[serde(default = "default_shader_speed")]
+    speed: u16,
+    #[serde(default = "default_shader_opacity")]
+    opacity: Opacity,
+}
+
+/// Returns the default animation speed (percent) for serde to use for a
+/// [`BackgroundShader`] if one is not specified.
+fn default_shader_speed() -> u16 {
+    100
+}
+
+/// Returns the default opacity for serde to use for a [`BackgroundShader`] if
+/// one is not specified.
+fn default_shader_opacity() -> Opacity {
+    60
+}
+
+impl Serialize for BackgroundShader {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let serialized = SerializedBackgroundShader {
+            name: self.name.clone(),
+            colors: self
+                .colors
+                .iter()
+                .map(hex_color::coloru_to_hex_string)
+                .collect(),
+            speed: self.speed,
+            opacity: self.opacity,
+        };
+        serialized.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BackgroundShader {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value: SerializedBackgroundShader =
+            SerializedBackgroundShader::deserialize(deserializer)?;
+
+        let colors = value
+            .colors
+            .iter()
+            .map(|hex| hex_color::coloru_from_hex_string(hex))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(serde::de::Error::custom)?;
+
+        Ok(BackgroundShader {
+            name: value.name,
+            colors,
+            speed: value.speed,
+            // Clamp to the valid 0-100 range so downstream `100 - opacity`
+            // arithmetic can't underflow.
+            opacity: value.opacity.min(100),
+        })
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct AnsiColor {
     pub r: u8,
@@ -595,6 +680,9 @@ pub struct WarpTheme {
     #[serde(skip_serializing_if = "Option::is_none")]
     background_image: Option<Image>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    background_shader: Option<BackgroundShader>,
+
     details: Details,
     terminal_colors: TerminalColors,
     // If name is None, we construct the name by processing the theme .yaml file name
@@ -621,6 +709,7 @@ impl WarpTheme {
             details: details.unwrap_or_else(|| Details::Custom(CustomDetails::default())),
             terminal_colors,
             background_image,
+            background_shader: None,
             name,
         }
     }
@@ -647,6 +736,10 @@ impl WarpTheme {
 
     pub fn background_image(&self) -> Option<Image> {
         self.background_image.clone()
+    }
+
+    pub fn background_shader(&self) -> Option<BackgroundShader> {
+        self.background_shader.clone()
     }
 }
 
