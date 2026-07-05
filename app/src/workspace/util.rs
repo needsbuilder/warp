@@ -407,11 +407,36 @@ fn get_terminal_background_opacity(window_id: WindowId, app: &AppContext) -> u8 
         .background_opacity
         .effective_opacity(window_id, app);
 
-    if let Some(img) = theme.background_image() {
+    if let Some(shader_opacity) = active_background_shader_opacity(app) {
+        // Treat the animated shader background like a background image: keep a
+        // dim theme-colored overlay over it so terminal text stays readable
+        // while the shader shows through. Takes precedence over any theme
+        // background image.
+        let opacity_ratio = background_opacity as f32 / 100.;
+        (((100 - shader_opacity) as f32) * opacity_ratio) as u8
+    } else if let Some(img) = theme.background_image() {
         let opacity_ratio = background_opacity as f32 / 100.;
         // Scale the overlay opacity with the background opacity ratio.
         (((100 - img.opacity) as f32) * opacity_ratio) as u8
     } else {
         background_opacity
     }
+}
+
+/// Whether the animated background shader is active; returns how strongly it
+/// shows through terminal panes (0-100), or `None` when the shader is off.
+///
+/// Mirrors the resolution in `settings::init::theme_background_shader_config`.
+pub fn active_background_shader_opacity(app: &AppContext) -> Option<u8> {
+    if !*WindowSettings::as_ref(app).animated_background {
+        return None;
+    }
+    // 60 matches the theme schema's default shader opacity.
+    Some(
+        Appearance::as_ref(app)
+            .theme()
+            .background_shader()
+            .map(|shader| shader.opacity.min(100))
+            .unwrap_or(60),
+    )
 }

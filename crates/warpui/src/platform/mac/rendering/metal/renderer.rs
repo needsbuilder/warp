@@ -135,11 +135,85 @@ impl Drop for RenderPass<'_> {
     }
 }
 
+/// The Metal fragment function implementing each background shader effect.
+/// All effects share `background_vertex_shader`.
+const BACKGROUND_SHADER_FRAGMENTS: &[(rendering::BackgroundShaderKind, &str)] = &[
+    (
+        rendering::BackgroundShaderKind::MeshGradient,
+        "background_mesh_gradient_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::Swirl,
+        "background_swirl_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::Warp,
+        "background_warp_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::NeuroNoise,
+        "background_neuro_noise_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::PerlinNoise,
+        "background_perlin_noise_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::ColorPanels,
+        "background_color_panels_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::Metaballs,
+        "background_metaballs_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::LiquidMetal,
+        "background_liquid_metal_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::GodRays,
+        "background_god_rays_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::Water,
+        "background_water_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::Voronoi,
+        "background_voronoi_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::SmokeRing,
+        "background_smoke_ring_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::Spiral,
+        "background_spiral_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::GrainGradient,
+        "background_grain_gradient_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::GemSmoke,
+        "background_gem_smoke_fragment_shader",
+    ),
+    (
+        rendering::BackgroundShaderKind::Heatmap,
+        "background_heatmap_fragment_shader",
+    ),
+];
+
 /// A set of resources necessary for rendering that retain state across frames.
 struct Resources {
     draw_rects_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     draw_images_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     draw_glyphs_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    /// One pipeline per background shader effect, keyed by kind.
+    background_pipeline_states: Vec<(
+        rendering::BackgroundShaderKind,
+        Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    )>,
     quad_vertices: Retained<ProtocolObject<dyn MTLBuffer>>,
     quad_indices: Retained<ProtocolObject<dyn MTLBuffer>>,
     glyph_cache: GlyphCache<Retained<ProtocolObject<dyn MTLTexture>>>,
@@ -151,6 +225,9 @@ struct Resources {
 pub struct Renderer {
     resources: Resources,
     command_queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
+    /// When the renderer was created; used to derive the elapsed-time uniform
+    /// that drives the animated background shader.
+    start_time: std::time::Instant,
 }
 
 impl Renderer {
@@ -221,6 +298,30 @@ impl Renderer {
             .newRenderPipelineStateWithDescriptor_error(&glyph_pipeline)
             .unwrap();
 
+        let background_vertex_shader = library
+            .newFunctionWithName(&NSString::from_str("background_vertex_shader"))
+            .unwrap();
+        let background_pipeline_states = BACKGROUND_SHADER_FRAGMENTS
+            .iter()
+            .map(|(kind, fragment_name)| {
+                let fragment_shader = library
+                    .newFunctionWithName(&NSString::from_str(fragment_name))
+                    .unwrap_or_else(|| {
+                        panic!("background fragment function {fragment_name} should exist")
+                    });
+                let pipeline = Self::create_pipeline(
+                    "Background",
+                    color_pixel_format,
+                    &background_vertex_shader,
+                    &fragment_shader,
+                );
+                let state = device
+                    .newRenderPipelineStateWithDescriptor_error(&pipeline)
+                    .unwrap();
+                (*kind, state)
+            })
+            .collect();
+
         let quad_vertices = new_metal_buffer(
             device,
             &[
@@ -245,6 +346,7 @@ impl Renderer {
                 draw_rects_pipeline_state,
                 draw_images_pipeline_state,
                 draw_glyphs_pipeline_state,
+                background_pipeline_states,
                 quad_vertices,
                 quad_indices,
                 glyph_cache,
@@ -253,6 +355,7 @@ impl Renderer {
             command_queue: device
                 .newCommandQueue()
                 .expect("device should always vend a command queue"),
+            start_time: std::time::Instant::now(),
         }
     }
 
@@ -339,6 +442,12 @@ impl<'a> Frame<'a> {
             zfar: 1.0,
         });
 
+        // Draw the animated background first (if the active theme enables
+        // one), so the terminal's rects/images/glyphs composite on top of it.
+        if let Some(background) = self.scene.rendering_config().background_shader {
+            self.draw_background(&background);
+        }
+
         for layer in self.scene.layers() {
             if let Some(bounds) = layer.clip_bounds {
                 // Make sure the scissor rect doesn't extend beyond the boundaries
@@ -370,6 +479,68 @@ impl<'a> Frame<'a> {
             self.draw_rects(layer);
             self.draw_images(layer);
             self.draw_glyphs(layer);
+        }
+    }
+
+    /// Draws a single full-screen quad through the background pipeline, filling
+    /// the whole window with the animated procedural shader before any scene
+    /// content is drawn on top.
+    fn draw_background(&mut self, background: &rendering::BackgroundShaderConfig) {
+        let Some((_, pipeline_state)) = self
+            .resources
+            .background_pipeline_states
+            .iter()
+            .find(|(kind, _)| *kind == background.kind)
+        else {
+            log::error!("No pipeline for background shader {:?}", background.kind);
+            return;
+        };
+        self.command_encoder.setRenderPipelineState(pipeline_state);
+
+        // The background spans the entire window, so reset the scissor rect to
+        // the full drawable (it may otherwise carry over from a prior frame).
+        self.command_encoder.setScissorRect(MTLScissorRect {
+            x: 0_usize,
+            y: 0_usize,
+            width: self.ctx.drawable_size.x() as usize,
+            height: self.ctx.drawable_size.y() as usize,
+        });
+
+        let time = self.ctx.elapsed_time * (background.speed_percent as f32 / 100.);
+        let colors = background
+            .colors
+            .map(|color| shader::Vector4F::from(color.to_f32()));
+        let uniforms = shader::BackgroundUniforms::new(
+            self.ctx.drawable_size.into(),
+            time,
+            background.colors_count as i32,
+            colors,
+        );
+        let uniforms_ptr = NonNull::from(&uniforms).cast::<c_void>();
+        let uniforms_len = mem::size_of::<shader::BackgroundUniforms>();
+
+        // SAFETY: the shared quad vertex/index buffers and the `uniforms` value
+        // outlive this encoded draw call, and the bound buffer sizes/indices
+        // match the background shader's bindings.
+        unsafe {
+            self.command_encoder.setVertexBuffer_offset_atIndex(
+                Some(&self.resources.quad_vertices),
+                0,
+                0,
+            );
+            self.command_encoder
+                .setVertexBytes_length_atIndex(uniforms_ptr, uniforms_len, 2);
+            self.command_encoder
+                .setFragmentBytes_length_atIndex(uniforms_ptr, uniforms_len, 0);
+            self.command_encoder
+                .drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount(
+                    MTLPrimitiveType::Triangle,
+                    6,
+                    MTLIndexType::UInt16,
+                    &self.resources.quad_indices,
+                    0,
+                    1,
+                );
         }
     }
 
@@ -1017,12 +1188,31 @@ mod shader {
             }
         }
     }
+
+    impl BackgroundUniforms {
+        pub fn new(
+            viewport_size: Vector2F,
+            time: f32,
+            colors_count: i32,
+            colors: [Vector4F; 8],
+        ) -> Self {
+            Self {
+                viewport_size: viewport_size.0,
+                time,
+                colors_count,
+                colors: colors.map(|color| color.0),
+            }
+        }
+    }
 }
 
 pub(super) struct MetalDrawContext<'a> {
     pub(super) device: &'a ProtocolObject<dyn MTLDevice>,
     pub(super) drawable: &'a ProtocolObject<dyn CAMetalDrawable>,
     pub(super) drawable_size: Vector2F,
+    /// Seconds since the renderer started, fed to the background shader's
+    /// `time` uniform.
+    pub(super) elapsed_time: f32,
     rasterize_glyph_fn: &'a RasterizeGlyphFn<'a>,
     glyph_raster_bounds_fn: &'a GlyphRasterBoundsFn<'a>,
 }
@@ -1069,10 +1259,13 @@ impl super::super::Renderer for Renderer {
             .nextDrawable()
             .expect("CAMetalLayer with allowsNextDrawableTimeout disabled always vends a drawable");
 
+        let elapsed_time = self.start_time.elapsed().as_secs_f32();
+
         let ctx = &MetalDrawContext {
             device: metal_device,
             drawable: &drawable,
             drawable_size: window.physical_size(),
+            elapsed_time,
             rasterize_glyph_fn: &|glyph_key, scale, subpixel_alignment, glyph_config, format| {
                 font_cache.rasterized_glyph(
                     glyph_key,

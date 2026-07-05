@@ -27484,7 +27484,13 @@ impl View for Workspace {
             .background_opacity
             .effective_opacity(self.window_id, app);
 
-        if let Some(img) = theme.background_image() {
+        if crate::workspace::util::active_background_shader_opacity(app).is_some() {
+            // The animated shader background is drawn by the renderer itself,
+            // behind all scene content — leave the workspace surface
+            // transparent (like the background-image case) so it shows
+            // through. Takes precedence over any theme background image.
+            stack.add_child(workspace.finish());
+        } else if let Some(img) = theme.background_image() {
             let opacity_ratio = background_opacity as f32 / 100.;
             stack.add_child(
                 Shrinkable::new(

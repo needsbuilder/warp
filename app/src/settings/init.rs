@@ -3,7 +3,11 @@ use std::path::Path;
 use settings::{Setting as _, SettingsManager};
 use warp_core::features::FeatureFlag;
 use warp_core::semantic_selection::SemanticSelection;
-use warpui::rendering::GPUPowerPreference;
+use warpui::color::ColorU;
+use warpui::rendering::{
+    BackgroundShaderConfig, BackgroundShaderKind, GPUPowerPreference,
+    BACKGROUND_SHADER_MAX_COLORS,
+};
 use warpui::{AppContext, SingletonEntity};
 use warpui_extras::user_preferences;
 
@@ -46,6 +50,40 @@ pub struct UserDefaultsOnStartup {
     pub tips_data: TipsCompleted,
     pub user_default_shell_unsupported_banner_state: BannerState,
     pub settings_file_error: Option<super::SettingsFileError>,
+}
+
+/// Builds the renderer's background-shader config from the animated-background
+/// settings and the active theme. Returns `None` when the master toggle is
+/// off.
+fn theme_background_shader_config(ctx: &AppContext) -> Option<BackgroundShaderConfig> {
+    let window_settings = WindowSettings::as_ref(ctx);
+    if !*window_settings.animated_background.value() {
+        return None;
+    }
+    let kind = window_settings.background_shader.value().kind();
+    let theme_shader = appearance::Appearance::as_ref(ctx)
+        .theme()
+        .background_shader();
+
+    // Use the theme's palette only when it was written for this same effect;
+    // otherwise fall back to the effect's default palette.
+    let theme_palette = theme_shader.as_ref().filter(|shader| {
+        !shader.colors.is_empty() && BackgroundShaderKind::from_name(&shader.name) == Some(kind)
+    });
+    let palette: &[ColorU] = match &theme_palette {
+        Some(shader) => &shader.colors,
+        None => kind.default_colors(),
+    };
+    let colors_count = palette.len().min(BACKGROUND_SHADER_MAX_COLORS);
+    let mut colors = [ColorU::transparent_black(); BACKGROUND_SHADER_MAX_COLORS];
+    colors[..colors_count].copy_from_slice(&palette[..colors_count]);
+
+    Some(BackgroundShaderConfig {
+        kind,
+        colors,
+        colors_count: colors_count as u8,
+        speed_percent: theme_shader.as_ref().map(|s| s.speed).unwrap_or(100),
+    })
 }
 
 /// Registers all settings groups with the application context.
@@ -220,6 +258,29 @@ pub fn init(
     );
 
     appearance::register(ctx);
+
+    // Wire the active theme's animated background shader into the rendering
+    // config, and keep it in sync when the theme or the animated-background
+    // setting changes. Must run after `appearance::register` so the
+    // `Appearance` singleton exists.
+    let background_shader = theme_background_shader_config(ctx);
+    ctx.update_rendering_config(|config| config.background_shader = background_shader);
+    ctx.subscribe_to_model(&appearance::Appearance::handle(ctx), |_, event, ctx| {
+        if matches!(event, appearance::AppearanceEvent::ThemeChanged) {
+            let background_shader = theme_background_shader_config(ctx);
+            ctx.update_rendering_config(|config| config.background_shader = background_shader);
+        }
+    });
+    ctx.subscribe_to_model(&WindowSettings::handle(ctx), |_, event, ctx| {
+        if matches!(
+            event,
+            crate::window_settings::WindowSettingsChangedEvent::AnimatedBackground { .. }
+                | crate::window_settings::WindowSettingsChangedEvent::BackgroundShaderChoice { .. }
+        ) {
+            let background_shader = theme_background_shader_config(ctx);
+            ctx.update_rendering_config(|config| config.background_shader = background_shader);
+        }
+    });
 
     // Set up hot-reload for the settings file. When the WarpConfig watcher
     // detects a change to settings.toml, reload preferences from disk and

@@ -35,6 +35,7 @@ fn bindgen_shader_types() {
         .header(header_path)
         .allowlist_type("vector_float2")
         .allowlist_type("Uniforms")
+        .allowlist_type("BackgroundUniforms")
         .allowlist_type("PerRectUniforms")
         .allowlist_type("PerGlyphUniforms")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))

@@ -85,7 +85,8 @@ use crate::util::bindings;
 use crate::view_components::action_button::{ActionButton, ButtonSize, NakedTheme};
 use crate::view_components::{Dropdown, DropdownItem, FilterableDropdown};
 use crate::window_settings::{
-    BackgroundBlurRadius, BackgroundBlurTexture, BackgroundOpacity, LeftPanelVisibilityAcrossTabs,
+    AnimatedBackground, BackgroundBlurRadius, BackgroundBlurTexture, BackgroundOpacity,
+    BackgroundShaderChoice, BackgroundShaderSelection, LeftPanelVisibilityAcrossTabs,
     OpenWindowsAtCustomSize, WindowSettings, WindowSettingsChangedEvent, ZoomLevel,
 };
 use crate::workspace::header_toolbar_editor::HeaderToolbarInlineEditor;
@@ -610,6 +611,8 @@ pub enum AppearancePageAction {
     ToggleUseLatestUserPromptAsConversationTitleInTabNames,
     ToggleLigatureRendering,
     ToggleBlurTexture,
+    ToggleAnimatedBackground,
+    SetBackgroundShader(BackgroundShaderSelection),
     ToggleLeftPanelVisibility,
     SetEnforceMinimumContrast(EnforceMinimumContrast),
     OpenUrl(String),
@@ -654,6 +657,7 @@ pub struct AppearanceSettingsPageView {
     workspace_decorations_dropdown: ViewHandle<Dropdown<AppearancePageAction>>,
     tab_close_button_position_dropdown: ViewHandle<Dropdown<AppearancePageAction>>,
     zoom_level_dropdown: ViewHandle<Dropdown<AppearancePageAction>>,
+    background_shader_dropdown: ViewHandle<Dropdown<AppearancePageAction>>,
     zoom_reset_button_mouse_state: MouseStateHandle,
     available_families: HashMap<String, (Option<FamilyId>, FontType)>,
     view_font_type: FontType,
@@ -729,6 +733,8 @@ impl TypedActionView for AppearanceSettingsPageView {
             ToggleAllAvailableFonts => self.toggle_all_available_fonts(ctx),
             ToggleDimInactivePanes => self.toggle_dim_inactive_panes(ctx),
             ToggleBlurTexture => self.toggle_blur_texture(ctx),
+            ToggleAnimatedBackground => self.toggle_animated_background(ctx),
+            SetBackgroundShader(selection) => self.set_background_shader(*selection, ctx),
             ToggleLeftPanelVisibility => self.toggle_left_panel_visibility(ctx),
             SetInputMode {
                 new_mode,
@@ -1390,6 +1396,7 @@ impl AppearanceSettingsPageView {
             ),
             tab_close_button_position_dropdown: Self::build_tab_close_button_position_dropdown(ctx),
             zoom_level_dropdown: Self::build_zoom_level_dropdown(ctx),
+            background_shader_dropdown: Self::build_background_shader_dropdown(ctx),
             zoom_reset_button_mouse_state: MouseStateHandle::default(),
             available_families: Default::default(),
             view_font_type: Default::default(),
@@ -1449,6 +1456,18 @@ impl AppearanceSettingsPageView {
             .is_supported_on_current_platform()
         {
             window_settings_widgets.push(Box::new(WindowBlurTextureWidget::default()));
+        }
+        if window_settings
+            .animated_background
+            .is_supported_on_current_platform()
+        {
+            window_settings_widgets.push(Box::new(AnimatedBackgroundWidget::default()));
+        }
+        if window_settings
+            .background_shader
+            .is_supported_on_current_platform()
+        {
+            window_settings_widgets.push(Box::new(BackgroundShaderWidget::default()));
         }
 
         if FeatureFlag::UIZoom.is_enabled() {
@@ -2454,6 +2473,15 @@ impl AppearanceSettingsPageView {
         ctx.notify();
     }
 
+    pub fn toggle_animated_background(&mut self, ctx: &mut ViewContext<Self>) {
+        WindowSettings::handle(ctx).update(ctx, |window_settings, ctx| {
+            report_if_error!(window_settings
+                .animated_background
+                .toggle_and_save_value(ctx));
+        });
+        ctx.notify();
+    }
+
     pub fn set_input_mode(
         &mut self,
         new_mode: InputMode,
@@ -2743,6 +2771,66 @@ impl AppearanceSettingsPageView {
 
             dropdown
         })
+    }
+
+    fn build_background_shader_dropdown(
+        ctx: &mut ViewContext<Self>,
+    ) -> ViewHandle<Dropdown<AppearancePageAction>> {
+        ctx.add_typed_action_view(|ctx| {
+            let mut dropdown = Dropdown::new(ctx);
+
+            dropdown.set_items(
+                BackgroundShaderSelection::VALUES
+                    .iter()
+                    .map(|&value| {
+                        DropdownItem::new(
+                            Self::background_shader_dropdown_item_label(value),
+                            AppearancePageAction::SetBackgroundShader(value),
+                        )
+                    })
+                    .collect(),
+                ctx,
+            );
+
+            let current_value = *WindowSettings::as_ref(ctx).background_shader.value();
+            dropdown
+                .set_selected_by_action(AppearancePageAction::SetBackgroundShader(current_value), ctx);
+
+            dropdown
+        })
+    }
+
+    fn background_shader_dropdown_item_label(selection: BackgroundShaderSelection) -> String {
+        match selection {
+            // Effect names are kept as-is (proper nouns from paper.design).
+            BackgroundShaderSelection::MeshGradient => "Mesh Gradient".to_string(),
+            BackgroundShaderSelection::Swirl => "Swirl".to_string(),
+            BackgroundShaderSelection::Warp => "Warp".to_string(),
+            BackgroundShaderSelection::NeuroNoise => "Neuro Noise".to_string(),
+            BackgroundShaderSelection::PerlinNoise => "Perlin Noise".to_string(),
+            BackgroundShaderSelection::ColorPanels => "Color Panels".to_string(),
+            BackgroundShaderSelection::Metaballs => "Metaballs".to_string(),
+            BackgroundShaderSelection::LiquidMetal => "Liquid Metal".to_string(),
+            BackgroundShaderSelection::GodRays => "God Rays".to_string(),
+            BackgroundShaderSelection::Water => "Water".to_string(),
+            BackgroundShaderSelection::Voronoi => "Voronoi".to_string(),
+            BackgroundShaderSelection::SmokeRing => "Smoke Ring".to_string(),
+            BackgroundShaderSelection::Spiral => "Spiral".to_string(),
+            BackgroundShaderSelection::GrainGradient => "Grain Gradient".to_string(),
+            BackgroundShaderSelection::GemSmoke => "Gem Smoke".to_string(),
+            BackgroundShaderSelection::Heatmap => "Heatmap".to_string(),
+        }
+    }
+
+    fn set_background_shader(
+        &mut self,
+        selection: BackgroundShaderSelection,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        WindowSettings::handle(ctx).update(ctx, |window_settings, ctx| {
+            report_if_error!(window_settings.background_shader.set_value(selection, ctx));
+        });
+        ctx.notify();
     }
 
     fn handle_directory_color_add_picker_event(
@@ -3647,6 +3735,94 @@ impl SettingsWidget for WindowBlurTextureWidget {
             }
         }
         col.finish()
+    }
+}
+
+#[derive(Default)]
+struct AnimatedBackgroundWidget {
+    switch_state: SwitchStateHandle,
+}
+
+#[derive(Default)]
+struct BackgroundShaderWidget {}
+
+impl SettingsWidget for BackgroundShaderWidget {
+    type View = AppearanceSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "background shader effect animated mesh swirl warp"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        render_dropdown_item(
+            appearance,
+            crate::menu_label(
+                "settings.appearance.label.background_shader",
+                "Background shader",
+            ),
+            None,
+            None,
+            LocalOnlyIconState::for_setting(
+                BackgroundShaderChoice::storage_key(),
+                BackgroundShaderChoice::sync_to_cloud(),
+                &mut view.local_only_icon_tooltip_states.borrow_mut(),
+                app,
+            ),
+            None,
+            &view.background_shader_dropdown,
+        )
+    }
+}
+
+impl SettingsWidget for AnimatedBackgroundWidget {
+    type View = AppearanceSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "animated background shader"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let window_settings = WindowSettings::as_ref(app);
+        let enabled = *window_settings.animated_background;
+        Flex::column()
+            .with_child(render_body_item::<AppearancePageAction>(
+                crate::menu_label(
+                    "settings.appearance.label.animated_background",
+                    "Animated background",
+                )
+                .to_string(),
+                None,
+                LocalOnlyIconState::for_setting(
+                    AnimatedBackground::storage_key(),
+                    AnimatedBackground::sync_to_cloud(),
+                    &mut view.local_only_icon_tooltip_states.borrow_mut(),
+                    app,
+                ),
+                ToggleState::Enabled,
+                appearance,
+                appearance
+                    .ui_builder()
+                    .switch(self.switch_state.clone())
+                    .check(enabled)
+                    .build()
+                    .on_click(|evt_ctx, _app, _v2f| {
+                        evt_ctx
+                            .dispatch_typed_action(AppearancePageAction::ToggleAnimatedBackground);
+                    })
+                    .finish(),
+                None,
+            ))
+            .finish()
     }
 }
 

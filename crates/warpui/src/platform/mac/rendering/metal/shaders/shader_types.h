@@ -7,6 +7,16 @@ typedef struct {
   vector_float2 viewport_size;
 } Uniforms;
 
+// Uniforms for the animated background shader. Colors are straight (non
+// premultiplied) RGBA; only the first `colors_count` entries are meaningful.
+typedef struct {
+  vector_float2 viewport_size;
+  // Animation time in seconds (speed multiplier already applied).
+  float time;
+  int colors_count;
+  vector_float4 colors[8];
+} BackgroundUniforms;
+
 typedef struct {
   vector_float2 origin;
   vector_float2 size;

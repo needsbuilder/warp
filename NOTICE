@@ -1,0 +1,17 @@
+NOTICE
+======
+
+This build of WarpOss (korean-ui fork) includes animated background shader
+effects ported to Metal Shading Language from Paper Shaders:
+
+  Paper Shaders (@paper-design/shaders)
+  https://github.com/paper-design/shaders
+  Copyright Paper Design, Inc.
+  Licensed under the Apache License, Version 2.0
+  (http://www.apache.org/licenses/LICENSE-2.0)
+
+The original GLSL fragment shaders were translated to Metal and adapted for
+full-window terminal backgrounds (uniform plumbing, aspect handling, and
+animation-loop integration). See
+crates/warpui/src/platform/mac/rendering/metal/shaders/shaders.metal for the
+ported effects; modified sections are marked in comments.

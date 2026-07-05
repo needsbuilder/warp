@@ -491,6 +491,9 @@ pub struct WindowState {
     executor: Rc<executor::Foreground>,
     ime_active: Cell<bool>,
     pub(super) capture_callback: RefCell<Option<FrameCaptureCallback>>,
+    /// Whether a redraw for the animated shader background is already
+    /// scheduled, so at most one frame timer is pending per window.
+    background_animation_frame_scheduled: Cell<bool>,
 }
 
 impl Window {
@@ -621,6 +624,7 @@ impl Window {
                 executor,
                 ime_active: Cell::new(false),
                 capture_callback: RefCell::new(None),
+                background_animation_frame_scheduled: Cell::new(false),
             });
 
             // Store a +1 reference to the window state in the window, its content
@@ -1456,6 +1460,12 @@ extern "C-unwind" fn warp_update_layer(this: &Object) {
         app::callback_dispatcher()
             .for_window(&Window(window.clone()))
             .frame_drawn();
+
+        // Keep the animated shader background moving by scheduling the next
+        // frame while the rendered scene has one enabled.
+        if scene.rendering_config().background_shader.is_some() {
+            schedule_background_animation_frame(window);
+        }
     }
 }
 
@@ -1687,6 +1697,46 @@ pub extern "C-unwind" fn warp_dealloc_window(native_window: &mut Object) {
 pub unsafe fn get_window_state(object: &Object) -> &Rc<WindowState> {
     let wrapper_ptr: *mut c_void = *object.get_ivar(WINDOW_STATE_IVAR);
     Ivar::get_state(wrapper_ptr)
+}
+
+/// Schedules the next frame of the animated shader background: after ~16ms
+/// (roughly 60fps), requests a redraw so the background is repainted with a
+/// fresh time uniform. At most one timer is pending per window; the flag is
+/// cleared when the timer fires so the following draw schedules the next one.
+///
+/// While the window is fully occluded or minimized, the loop idles at a slow
+/// tick instead — no point burning GPU/battery on an invisible animation —
+/// and recovers to full rate on the first frame after it becomes visible.
+fn schedule_background_animation_frame(window_state: &Rc<WindowState>) {
+    if window_state.background_animation_frame_scheduled.replace(true) {
+        return;
+    }
+
+    // NSWindowOcclusionStateVisible == 1 << 1.
+    const NS_WINDOW_OCCLUSION_STATE_VISIBLE: u64 = 1 << 1;
+    // SAFETY: messaging a valid window.
+    let occlusion_state: u64 = unsafe { msg_send![window_state.window(), occlusionState] };
+    let visible = occlusion_state & NS_WINDOW_OCCLUSION_STATE_VISIBLE != 0;
+    let frame_interval = if visible {
+        Duration::from_millis(16)
+    } else {
+        Duration::from_millis(500)
+    };
+
+    let weak_window_state = Rc::downgrade(window_state);
+    let instant = Instant::now() + frame_interval;
+    window_state
+        .executor
+        .spawn(async move {
+            Timer::at(instant).await;
+            if let Some(window_state) = weak_window_state.upgrade() {
+                window_state
+                    .background_animation_frame_scheduled
+                    .set(false);
+                platform::WindowContext::request_redraw(window_state.as_ref());
+            }
+        })
+        .detach();
 }
 
 fn schedule_synthetic_drag(
